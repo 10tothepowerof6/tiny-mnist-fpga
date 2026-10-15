@@ -9,6 +9,8 @@ Thumbs.db
 *.swo
 
 # Python - AI
+.venv/
+ai/dataset/*.idx*-ubyte
 __pycache__/
 *.py[cod]
 *.pyo
@@ -63,4 +65,3 @@ modelsim.ini
 *~
 
 # gen/*.mem, gen/*.coe, gen/*.svh
-# ai/dataset/*.idx*-ubyte
