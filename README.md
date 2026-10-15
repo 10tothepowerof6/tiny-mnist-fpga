@@ -1,108 +1,137 @@
-# TinyML Accelerator trên FPGA: nhận diện chữ số MNIST
+# TinyML Accelerator trên FPGA
 
-> Giai đoạn hiện tại: **lập kế hoạch**. Repo mới có kế hoạch và tài liệu, chưa có code.
+Bộ tăng tốc phần cứng cho mạng nơ-ron lượng tử hoá int8, nhận diện chữ số viết tay MNIST, thiết kế bằng SystemVerilog trên FPGA Xilinx Artix-7.
 
-Nhóm 2 người tự thiết kế một bộ tăng tốc phần cứng trên FPGA, chạy mạng nơ-ron int8 nhỏ để nhận diện chữ số viết tay (MNIST). Công cụ dùng là **Vivado**.
+---
 
-## 1. Board
+## 1. Mục tiêu
 
-| Board | Chip | LUT | BRAM | DSP | Clock | Vai trò |
-|---|---|---|---|---|---|---|
-| Digilent **Basys 3** | XC7A35T-1CPG236C | 20.800 | 50 × 36 Kb | 90 | 100 MHz | board chính |
-| Digilent **Nexys A7-100T** | XC7A100T-1CSG324C | 63.400 | 135 × 36 Kb | 240 | 100 MHz | chạy cấu hình lớn hơn (P = 32, mạng 784-128-10) |
+Thiết kế và demo một bộ tăng tốc phần cứng nhận ảnh chữ số viết tay 28×28 từ máy tính, chạy suy luận mạng nơ-ron int8 ngay trên FPGA và trả về chữ số dự đoán.
 
-Hai board sẽ dùng chung RTL, chỉ khác file top và file gán chân (`.xdc`). Cả hai đều có sẵn USB-UART để nhận ảnh từ PC.
-
-## 2. Mục tiêu
-
-**Tổng quát:** tự thiết kế bằng SystemVerilog (không dùng HLS) một bộ tăng tốc int8 trên FPGA giá rẻ. Bộ tăng tốc phải chạy nhanh hơn nhiều lần so với bộ xử lý nhúng cùng tầm giá, với độ chính xác gần bằng mô hình float32.
-
-| Mã | Mục tiêu | Mức cơ bản | Mức mở rộng |
-|---|---|---|---|
-| MT1 | Độ chính xác int8 (10.000 ảnh test) | ≥ 95 %, mất ≤ 1 % so với float32 | ≥ 97,5 % |
-| MT2 | Phần cứng khớp mô hình Python | 100 % từng bit | — |
-| MT3 | Độ trễ mỗi ảnh @ 100 MHz | ≤ 50 µs | ≤ 10 µs |
-| MT4 | So với CPU mềm MicroBlaze trên cùng chip | nhanh hơn ≥ 20 lần | ≥ 100 lần |
-| MT5 | Tài nguyên | ≤ 50 % DSP và BRAM | bảng đánh đổi theo P |
-| MT6 | Năng lượng mỗi ảnh | có số đo từ Vivado Power Report | so với CPU và vi điều khiển |
-| MT7 | Demo | nhận dạng ảnh gửi từ PC qua UART | ảnh vẽ tay thật |
-
-## 3. Phân công
-
-| Bạn AI (Python) | Bạn vi mạch (SystemVerilog, Vivado) |
+| Hạng mục | Nội dung |
 |---|---|
-| Huấn luyện MLP 784-32-10 trên MNIST | Thiết kế khối MAC int8 × int8 → int32 |
-| Lượng tử hoá float32 → int8, chọn scale | Thiết kế lớp fully-connected: FSM, ROM BRAM, P MAC song song |
-| Viết mô hình tham chiếu int8 (đáp án chuẩn) | Ghép 2 lớp, argmax, UART, LED 7 đoạn |
-| Xuất trọng số ra file ROM (`.mem`, `.coe`) + test vector | Testbench so khớp từng bit với Python |
-| Công cụ gửi ảnh từ PC, đo CPU để so sánh | Tổng hợp Vivado, đo tài nguyên/timing/công suất, nạp board |
+| Bài toán | Nhận diện chữ số viết tay (MNIST, 10 lớp) |
+| Mô hình | MLP 784-32-10, trọng số int8 |
+| Board demo | **Digilent Basys 3** (Artix-7 XC7A35T) và **Digilent Nexys A7-100T** (Artix-7 XC7A100T) |
+| Công cụ | Vivado (thiết kế phần cứng), Python (huấn luyện, lượng tử hoá) |
+| Kịch bản demo | PC gửi ảnh qua UART → FPGA suy luận → kết quả hiện trên LED 7 đoạn và gửi về PC |
+| Tiêu chí đạt | Độ chính xác ≥ 95 % · kết quả phần cứng khớp 100 % với mô hình tham chiếu · độ trễ ≤ 50 µs/ảnh tại 100 MHz |
 
-## 4. Kiến trúc dự kiến
+---
+
+## 2. Cấu trúc thư mục
 
 ```
-PC ─UART─► bộ đệm ảnh 784 B ─► FC1 784→32 (P MAC) + ReLU ─► bộ đệm ẩn 32 B
-                                   ▲ ROM trọng số (BRAM)              │
-PC ◄─UART─ LED 7 đoạn ◄─ argmax ◄─ FC2 32→10 ◄─────────────────────────┘
+tinyml-fpga/
+├── README.md
+├── ai/                          # Huấn luyện và lượng tử hoá (Python)
+│   ├── train_quant_export.py    #   huấn luyện, lượng tử int8, xuất file ROM và test vector
+│   ├── send_image.py            #   gửi ảnh xuống board qua UART, nhận kết quả
+│   └── cpu_baseline.py          #   đo tốc độ CPU để so sánh
+├── gen/                         # File trao đổi AI ↔ phần cứng (tự sinh, không sửa tay)
+│   ├── w1.mem, w2.mem           #   trọng số int8
+│   ├── b1.mem, b2.mem           #   bias int32
+│   ├── w1.coe, w2.coe           #   trọng số cho IP Block Memory (dự phòng)
+│   ├── quant_params.svh         #   kích thước mạng, số MAC song song, hệ số requant
+│   ├── test_images.mem          #   ảnh kiểm thử
+│   └── test_expected.mem        #   kết quả chuẩn từ mô hình tham chiếu
+├── rtl/                         # Thiết kế phần cứng (SystemVerilog)
+│   ├── mac_pe.sv                #   khối nhân - cộng dồn int8 × int8 → int32
+│   ├── dense_layer.sv           #   lớp fully-connected: FSM, ROM BRAM, P MAC song song
+│   ├── tinyml_accel.sv          #   lõi tăng tốc: bộ đệm, 2 lớp, argmax
+│   ├── uart.sv                  #   UART RX/TX
+│   ├── basys3_top.sv            #   top cho Basys 3
+│   └── nexys_a7_top.sv          #   top cho Nexys A7-100T
+├── tb/                          # Testbench
+│   ├── tb_tinyml_accel.sv       #   so sánh từng bit với mô hình tham chiếu
+│   └── tb_board_top.sv          #   kiểm thử toàn hệ thống qua UART
+├── constr/                      # Ràng buộc chân
+│   ├── basys3.xdc
+│   └── nexys_a7_100t.xdc
+├── scripts/
+│   └── create_project.tcl       # Tạo project Vivado cho từng board
+└── docs/                        # Tài liệu
+    ├── De_cuong_tong_hop_TinyML_FPGA.pdf
+    ├── PHAN_TICH.md
+    └── So_do_cau_truc.pdf / .png
 ```
 
-- Một module lớp fully-connected dùng lại cho cả 2 lớp. Mỗi lớp tính P neuron song song, quét lần lượt các đầu vào. Số chu kỳ ước tính ≈ (OUT/P)·(IN+P+3).
-- Trọng số nằm trong BRAM trên chip (khoảng 200 kbit), không cần DDR hay CPU mềm.
-- Toàn bộ phép tính dùng số nguyên, không có dấu phẩy động trên FPGA.
+Luồng dữ liệu giữa các thư mục:
 
-## 5. Quy ước chung giữa 2 bạn (chốt trước khi code)
+```
+ai/  ──(xuất)──►  gen/  ──(nạp ROM, test vector)──►  rtl/ + tb/  ──(Vivado)──►  Basys 3 / Nexys A7-100T
+```
 
-| Mục | Quy ước |
-|---|---|
-| Đầu vào | pixel 0..255, thứ tự hàng trước; `x_q = pixel >> 1` (0..127) |
-| Trọng số | int8 đối xứng, một scale cho cả tensor: `W_q = round(W / s_w)`, `s_w = max\|W\| / 127` |
-| Bias | int32: `b_q = round(b / (s_w · s_in))` |
-| Requant lớp ẩn | `h = clamp((acc·M1 + 2^23) >>> 24, 0, 127)`, `>>>` là dịch phải số học |
-| Lớp ra | logit int32, `pred = argmax`; nếu bằng nhau thì lấy chỉ số nhỏ hơn |
-| Bố cục ROM | `addr = g·IN + i`; `word[8k+7:8k] = W_q[g·P+k][i]` |
-| Test vector | mỗi ảnh: pred + 10 logit, do mô hình Python sinh ra |
+---
 
-Mỗi khi đổi một quy ước, phải sửa cả Python lẫn RTL và chạy lại testbench cho tới khi PASS.
+## 3. Nhiệm vụ
 
-## 6. Kế hoạch 8 tuần
-
-| Tuần | Bạn AI | Bạn vi mạch | Xong khi |
-|---|---|---|---|
-| 1 | Train + lượng tử, mô hình tham chiếu int8 | MAC + lớp FC, testbench đơn vị | Hai bên chạy được phần của mình |
-| 2 | Xuất ROM + test vector, công cụ gửi ảnh | Ghép lõi, UART, Vivado trên Basys 3 | **Board nhận đúng ảnh test qua UART** |
-| 3–4 | Thử lớp ẩn 16/64/128, huấn luyện có lượng tử (QAT) | Quét P = 4/8/16/32, chạy cấu hình lớn trên Nexys A7 | Bảng độ chính xác và bảng tài nguyên |
-| 5–6 | Scale riêng từng neuron hoặc trọng số 4 bit, đo CPU | Bỏ qua pixel 0, 2 MAC mỗi DSP, đo MicroBlaze | Số đo trước và sau tối ưu |
-| 7 | (Tuỳ chọn) CNN hoặc keyword spotting | (Tuỳ chọn) khối tích chập | Chỉ làm khi tuần 2–6 xong |
-| 8 | Báo cáo, slide | Báo cáo, demo | **Demo** |
-
-## 7. Đối tượng so sánh
-
-| Nền tảng | Độ trễ mỗi ảnh | Loại số liệu |
+| # | Nhiệm vụ | Kết quả cần có |
 |---|---|---|
-| CPU mềm MicroBlaze trên Basys 3 @ 100 MHz | ~2–2,5 ms | ước tính, sẽ đo ở tuần 6 |
-| Vi điều khiển Cortex-M4 @ 84 MHz | ~0,3–1,5 ms | ước tính |
-| CPU máy tính (Xeon 2,8 GHz, C, 1 luồng) | ~5 µs | đo thử |
-| [FINN](https://arxiv.org/pdf/1612.07119) SFC, ZC706 (trọng số 1 bit) | 0,31–240 µs | công bố |
-| [SNN 784-128-10 trên Basys 3](https://arxiv.org/pdf/2507.07284) | 520 µs, 0,381 W | công bố |
+| 1 | Thống nhất quy ước giao tiếp AI ↔ phần cứng (mục 4) | Bảng quy ước được chốt |
+| 2 | Huấn luyện mô hình MLP 784-32-10 trên MNIST | Mô hình float32, độ chính xác ≥ 96 % |
+| 3 | Lượng tử hoá int8 và xây dựng mô hình tham chiếu số nguyên | Mô hình int8, mất ≤ 1 % độ chính xác |
+| 4 | Xuất trọng số ra file ROM và sinh test vector | Các file trong `gen/` |
+| 5 | Thiết kế khối MAC và lớp fully-connected | `mac_pe.sv`, `dense_layer.sv` |
+| 6 | Ghép lõi tăng tốc: bộ đệm, 2 lớp, argmax | `tinyml_accel.sv` |
+| 7 | Kiểm chứng bằng mô phỏng | Testbench khớp 100 % với mô hình tham chiếu |
+| 8 | Giao tiếp board: UART, LED 7 đoạn, ràng buộc chân | Top và `.xdc` cho 2 board |
+| 9 | Tổng hợp, đạt timing 100 MHz, nạp board | Bitstream chạy trên Basys 3 và Nexys A7-100T |
+| 10 | Đo đạc và tối ưu | Báo cáo tài nguyên, độ trễ, công suất; so sánh với CPU |
+| 11 | Demo và báo cáo | Demo nhận dạng trực tiếp trên board |
 
-## 8. Rủi ro chính
+---
 
-| Rủi ro | Cách giảm |
+## 4. Quy ước giao tiếp giữa AI và phần cứng
+
+Mọi thay đổi quy ước phải được cập nhật đồng thời ở mô hình tham chiếu Python và thiết kế RTL, sau đó chạy lại testbench cho đến khi đạt.
+
+### 4.1. Dữ liệu đầu vào
+
+| Thông số | Quy ước |
 |---|---|
-| Hai bạn hiểu khác nhau về cách lượng tử | Chốt quy ước ở mục 5, testbench so từng bit |
-| Vivado không suy ra BRAM, hoặc không đạt timing 100 MHz | Kiểm tra báo cáo sớm (tuần 2), thêm tầng register, dùng IP Block Memory |
-| UART chậm (khoảng 68 ms mỗi ảnh) che mất tốc độ phần cứng | Đếm chu kỳ trong phần cứng để đo |
-| Ôm đồm CNN/KWS khi bản cơ bản chưa chạy | Mốc tuần 2 bắt buộc phải chạy trên board |
+| Kích thước ảnh | 28 × 28 pixel, uint8 (0–255) |
+| Thứ tự lưu | Theo hàng: `địa chỉ = hàng × 28 + cột` |
+| Tiền xử lý | `x_q = pixel >> 1` (dải 0–127) |
+| Thang đo đầu vào | `s_x = 1/127`; mô hình được huấn luyện trên `x_q / 127` |
 
-## 9. Cấu trúc repo dự kiến
+### 4.2. Lượng tử hoá
+
+| Thông số | Quy ước |
+|---|---|
+| Trọng số | int8 đối xứng, dải [−127, 127], một scale cho cả tensor: `W_q = round(W / s_w)`, `s_w = max\|W\| / 127` |
+| Bias | int32: `b_q = round(b / (s_w · s_in))` |
+| Bộ cộng dồn | int32 có dấu |
+| Requant lớp ẩn | `h = clamp((acc · M1 + 2^23) >>> 24, 0, 127)`, trong đó `M1 = round(s_w1 · s_x / s_h · 2^24)` |
+| Phép dịch | Dịch phải số học (`>>>`), làm tròn về phía âm vô cùng |
+| Hàm kích hoạt | ReLU, gộp vào bước clamp |
+| Lớp đầu ra | Logit int32, không requant |
+| Kết quả | `argmax` của 10 logit; khi bằng nhau chọn chỉ số nhỏ nhất |
+
+### 4.3. Định dạng file trao đổi
+
+| File | Nội dung | Định dạng |
+|---|---|---|
+| `w1.mem`, `w2.mem` | Trọng số | Hex, một word mỗi dòng |
+| `b1.mem`, `b2.mem` | Bias | Hex, một số int32 bù 2 mỗi dòng (8 ký tự) |
+| `quant_params.svh` | `N_IN`, `N_HID`, `N_OUT`, `PE1`, `PE2`, `M1`, `SHIFT` | Hằng số SystemVerilog |
+| `test_images.mem` | Ảnh kiểm thử | Hex, một pixel mỗi dòng |
+| `test_expected.mem` | Kết quả chuẩn | Mỗi ảnh 11 dòng: dự đoán, logit 0–9 (int32) |
+
+Bố cục bộ nhớ trọng số, với P là số MAC song song của lớp:
 
 ```
-ai/       Python: train, lượng tử, xuất ROM, gửi ảnh, đo CPU       (bạn AI)
-gen/      File tự sinh: trọng số .mem/.coe, tham số, test vector   (bạn AI tạo, bạn vi mạch dùng)
-rtl/      SystemVerilog: MAC, lớp FC, lõi, UART, top từng board   (bạn vi mạch)
-tb/       Testbench                                               (bạn vi mạch)
-constr/   File chân: basys3.xdc, nexys_a7_100t.xdc                (bạn vi mạch)
-scripts/  Script Tcl tạo project Vivado
-docs/     Đề cương (PDF), phân tích
+địa chỉ                = g × IN + i            (g: nhóm neuron, i: chỉ số đầu vào)
+word[8k+7 : 8k]        = W_q[g × P + k][i]     (k = 0 … P−1, neuron nhỏ ở bit thấp)
 ```
 
-Chi tiết: [docs/De_cuong_TinyML_FPGA.pdf](docs/De_cuong_TinyML_FPGA.pdf), [docs/PHAN_TICH.md](docs/PHAN_TICH.md).
+### 4.4. Giao tiếp board
+
+| Thông số | Quy ước |
+|---|---|
+| Xung nhịp | 100 MHz (cả hai board) |
+| UART | 115200 baud, 8N1 |
+| Khung dữ liệu vào | Đúng 784 byte mỗi ảnh; nghỉ quá 10 ms thì bắt đầu khung mới |
+| Dữ liệu trả về | Một ký tự ASCII `'0'`–`'9'` |
+| Hiển thị | Chữ số trên LED 7 đoạn, đèn LED tương ứng sáng |
+| Reset | Nút giữa (BTNC) |
