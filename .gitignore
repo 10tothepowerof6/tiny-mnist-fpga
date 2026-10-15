@@ -1,0 +1,66 @@
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Python - AI
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+.ipynb_checkpoints/
+*.log
+*.ckpt
+*.pt
+*.pth
+*.npz
+*.pkl
+
+# Vivado - Basys 3 (giữ lại rtl/*.sv, constr/*.xdc nguồn)
+*.bit
+*.bin
+*.ltx
+*.xpr
+*.jou
+*.dcp
+*.rpt
+*.str
+_Xmsgs/
+.Xil/
+*.runs/
+*.cache/
+*.hw/
+*.ip_user_files/
+*.sim/
+
+# Quartus - DE10-Lite dự phòng
+db/
+incremental_db/
+greybox_tmp/
+*.sof
+*.pof
+*.sld
+*.qws
+*.ddb
+
+# Simulation
+work/
+transcript
+*.wlf
+*.vcd
+vsim.wlf
+modelsim.ini
+
+# Temp
+*.tmp
+*.bak
+*~
+
+# gen/*.mem, gen/*.coe, gen/*.svh
+# ai/dataset/*.idx*-ubyte
