@@ -130,8 +130,18 @@ word[8k+7 : 8k]        = W_q[g × P + k][i]     (k = 0 … P−1, neuron nhỏ �
 | Thông số | Quy ước |
 |---|---|
 | Xung nhịp | 100 MHz (cả hai board) |
-| UART | 115200 baud, 8N1 |
+| UART | 1 000 000 baud, 8N1 (`CLKS_PER_BIT = 100`, chia hết từ 100 MHz) |
 | Khung dữ liệu vào | Đúng 784 byte mỗi ảnh; nghỉ quá 10 ms thì bắt đầu khung mới |
 | Dữ liệu trả về | Một ký tự ASCII `'0'`–`'9'` |
 | Hiển thị | Chữ số trên LED 7 đoạn, đèn LED tương ứng sáng |
-| Reset | Nút giữa (BTNC) |
+| Reset | Nexys A7: nút đỏ CPU RESET (chân C12, tích cực mức thấp) |
+
+---
+
+## 5. Phần cứng đã làm
+
+Thư mục `rtl/`, `tb/`, `constr/`, `gen/`, `pc/`, `tools/` chứa bản RTL đã chạy mô phỏng đạt:
+testbench `tb_tinyml_top` gửi 20 ảnh qua UART và kết quả FPGA khớp 100 % với mô hình tham chiếu int8.
+Trọng số được nhúng sẵn trong ROM (`tools/gen_rom.py` sinh lại từ `gen/*.mem` khi train lại).
+
+Cách tạo project Vivado, chạy mô phỏng và mở trang web xem kết quả: [docs/HUONG_DAN_CHAY.md](docs/HUONG_DAN_CHAY.md).

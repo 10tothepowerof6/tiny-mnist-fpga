@@ -66,3 +66,6 @@ modelsim.ini
 
 # gen/*.mem, gen/*.coe, gen/*.svh
 
+
+# Trang web mo phong
+pc/_tam/
